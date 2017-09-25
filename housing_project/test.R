@@ -15,7 +15,8 @@ pkg.list <- c("dplyr",
               "Quandl",
               "Sweep",
               "tidyquant",
-              "forcats")
+              "forcats",
+              "extraTrees")
 
 
 new.pkgs <- pkg.list[!pkg.list %in% installed.packages()[, "Package"]]
@@ -52,4 +53,5 @@ dat <- dat[complete.cases(dat)]
 
 # Exploration -------------------------------------------------------------
 te <- dat[, median(Price, na.rm = TRUE), by = c("Month")]
-ggplot(te, aes(x = Month, y = V1)) + geom_point()
+names(te)[2] <- "Median.price"
+ggplot(te, aes(x = Month, y = Median.price)) + geom_line()

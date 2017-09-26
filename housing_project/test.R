@@ -7,6 +7,7 @@ pkg.list <- c("dplyr",
               "caret",
               "stringr",
               "lubridate",
+              "dummies",
               "ggplot2",
               "randomForest",
               "caret",
@@ -76,27 +77,38 @@ dat[, Postcode := substring(as.character(Postcode), 1, 2)]
 dat[, Postcode := as.factor(Postcode)]
 # Removing feature round 1 ------------------------------------------------
 #dat[, c("Date", "Lattitude", "Longtitude", "SellerG", "Address"):= NULL]
-dat <- dat[, !names(dat) %in% c("Date", "Lattitude", "Longtitude", "SellerG", "Address", "Suburb"), with = FALSE]
+dat <- dat[, !names(dat) %in% c("CouncilArea", "Regionname", "Date", "Lattitude", "Longtitude", "SellerG", "Address", "Suburb"), with = FALSE]
 
 sapply(dat[, names(dat) %in% factorCols, with = F], function(x) length(unique(x)))
 
+
+
+# Dummy -------------------------------------------------------------------
+
+dum.dat <- dummy.data.frame(dat, sep = ".")
+names(dum.dat)
+dum.dat <- dum.dat[complete.cases(dum.dat), ]
 # Modeling - train/test split ---------------------------------------------
-dat <- dat[complete.cases(dat)]
 set.seed(1015)
-trainIndex <- createDataPartition(dat$Price, p = .8, list = FALSE, times = 1)
-houseTrain <- dat[trainIndex, ]
-houseTest <- dat[-trainIndex, ]
+trainIndex <- createDataPartition(dum.dat$Price, p = .8, list = FALSE, times = 1)
+houseTrain <- dum.dat[trainIndex, ]
+houseTest <- dum.dat[-trainIndex, ]
 
 
 
 # Modeling - Training -----------------------------------------------------
-gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9), 
-                        n.trees = (1:30) * 50, 
-                        shrinkage = 0.1,
-                        n.minobsinnode = 20)
-fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
-gbmFit1 <- train(Price ~., data = houseTrain, method = "gbm", trControl = fitControl, verbose = TRUE, tuneGrid = gbmGrid)
+control <- trainControl(method="repeatedcv", number = 5, repeats = 1, search="grid")
+tunegrid <- expand.grid(.mtry = c(1:15))
+rf_gridsearch <- train(Price ~ ., data = houseTrain, method = "rf", metric = "RMSE", tuneGrid = tunegrid, trControl = control, verbose = TRUE)
+print(rf_gridsearch)
+plot(rf_gridsearch)
 
-gbmFit1
+
+bestmtry <- tuneRF(houseTrain[, !colnames(houseTrain) %in% "Price"], houseTrain$Price, stepFactor = 1.5, ntree = 1000)
+print(bestmtry) 
+
+
+
+
 trellis.par.set(caretTheme())
 plot(gbmFit1)

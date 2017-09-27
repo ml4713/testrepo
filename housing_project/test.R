@@ -48,11 +48,9 @@ factorCols <- names(dat)[sapply(dat, class) %in% "factor"]
 MISSING_THRES <- 0.5
 dat <- dat[, names(dat)[sapply(dat, function(x) sum(is.na(x))/nrow(dat)) < MISSING_THRES], with = FALSE]
 #dat[, sapply(.SD, function(x) sum(is.na(x)))/nrow(dat) > MISSING_THRES, .SDcols = names(dat)]
-sapply(dat, function(x) sum(is.na(x))/nrow(dat))
+#sapply(dat, function(x) sum(is.na(x))/nrow(dat))
 
-dat[is.na(Bedroom2), "Bathroom", with = F] #bathrooms missing == bedrooms missing
 summary(dat[is.na(Bedroom2)]) #missing at random
-#dat <- dat[complete.cases(dat)]
 
 # Exploration -------------------------------------------------------------
 monthprice <- dat[, .(med.price = median(Price, na.rm = TRUE)), by = c("Month")]
@@ -64,30 +62,22 @@ ggplot(dat, aes(x = Price)) +
   geom_density(color = "red", fill = "red", alpha = 0.3)
 
 
-
-
-
-pc <- fread("https://raw.githubusercontent.com/charliesome/australia_postcode/master/lib/australia/postcode/data.csv", header = TRUE)
-names(pc)[1] <- "Postcode"
-pc[, Postcode := as.character(Postcode)]
-#pc <- pc[, c("Postcode", "state"), with = FALSE]
-#pc <- pc[!duplicated(pc)]
-#dat <- merge(dat, pc, by = "Postcode")
+#pc <- fread("https://raw.githubusercontent.com/charliesome/australia_postcode/master/lib/australia/postcode/data.csv", header = TRUE)
+#names(pc)[1] <- "Postcode"
+#pc[, Postcode := as.character(Postcode)]
 dat[, Postcode := substring(as.character(Postcode), 1, 2)]
 dat[, Postcode := as.factor(Postcode)]
 # Removing feature round 1 ------------------------------------------------
 #dat[, c("Date", "Lattitude", "Longtitude", "SellerG", "Address"):= NULL]
 dat <- dat[, !names(dat) %in% c("CouncilArea", "Regionname", "Date", "Lattitude", "Longtitude", "SellerG", "Address", "Suburb"), with = FALSE]
-
 sapply(dat[, names(dat) %in% factorCols, with = F], function(x) length(unique(x)))
 
 
-
 # Dummy -------------------------------------------------------------------
-
 dum.dat <- dummy.data.frame(dat, sep = ".")
-names(dum.dat)
 dum.dat <- dum.dat[complete.cases(dum.dat), ]
+
+
 # Modeling - train/test split ---------------------------------------------
 set.seed(1015)
 trainIndex <- createDataPartition(dum.dat$Price, p = .8, list = FALSE, times = 1)
@@ -95,20 +85,10 @@ houseTrain <- dum.dat[trainIndex, ]
 houseTest <- dum.dat[-trainIndex, ]
 
 
-
 # Modeling - Training -----------------------------------------------------
-control <- trainControl(method="repeatedcv", number = 5, repeats = 1, search="grid")
-tunegrid <- expand.grid(.mtry = c(1:15))
-rf_gridsearch <- train(Price ~ ., data = houseTrain, method = "rf", metric = "RMSE", tuneGrid = tunegrid, trControl = control, verbose = TRUE)
-print(rf_gridsearch)
-plot(rf_gridsearch)
-
+rf <- randomForest(Price ~., data = houseTrain, importance = TRUE, ntree = 2000)
+varImpPlot(rf)
 
 bestmtry <- tuneRF(houseTrain[, !colnames(houseTrain) %in% "Price"], houseTrain$Price, stepFactor = 1.5, ntree = 1000)
 print(bestmtry) 
 
-
-
-
-trellis.par.set(caretTheme())
-plot(gbmFit1)

@@ -1,14 +1,22 @@
 ---
-title: "Housing Project - Rita Li"
+title: "Housing Project"
+author: "Rita Li"
 output: html_notebook
 ---
 
 ## Business Understanding
-This project task will be predicting the price for Australia, VIC state properties. We want to understand something....
+There are different ways to evalute the value of residential real estate. Approaches are different from each other based on what kind of data is avaliable for us. Buyers or investors want to know the whether they are making the right decision by looking at various factors and machine learning is here to help.
 
-Business context blah blah....
+This project's objective is to:
 
-Also, thanks to Matt, we don't have data dictionary for this dataset which means we are building modeling on columns we have zero knowledge on and making educated guess.
+1. Understand the relationship between predictors and price. More specifically, being able to answer the question of what are the most important factors that affect the price. 
+
+2.  Have a scientific approach to determine the price of a given property which means using data science techiniques to provide more insightful and provable numbers instead of relying on human judge so that we are able to tell if the property is underpriced or overpriced.
+
+
+image: ![](aus_map.gif)
+
+For this particular study, Australia Victoria state would be the focus. The housing market in this area has been performing admirably, with a trend of positive growth over the past five years. So we have increasing demands from our customers who want to know more about this. 
 
 ```{r}
 #1.set up the environment
@@ -19,11 +27,15 @@ gc()
 pkg.list <- c("dplyr", 
               "tidyr", 
               "caret",
+              "corrplot",
               "stringr",
               "lubridate",
               "dummies",
               "ggplot2",
+              "png",
+              "grid",
               "randomForest",
+              "rpart",
               "caret",
               "data.table",
               "devtools",
@@ -36,15 +48,25 @@ loaded.pkgs <- lapply(pkg.list, require, character.only = TRUE)
 
 #1b. set up the work dir
 setwd("/Users/trpff26/Desktop/misc/housing_project")
+
+#1c. load user define functions
+source("multiplot_func.R")
 ```
 
 
+
 ## Data Exploration
+
+
 Now let's load the data and see what they looks like
+
 ```{r}
 dat <- fread("housing_data.csv", header = TRUE, na.strings = c("", " ", "NA"))
 head(dat)
 ```
+Thanks to Matt, we don't have a data dictionary for this dataset which means we are building modeling on columns we have zero (a bit more than zero) knowledge on and making educated guess. So techincally, this is a test on your real estate knowledge instead of ML/DS.
+
+
 
 ```{r}
 dim(dat)
@@ -54,16 +76,23 @@ We have 21 features and 17k data observations. Enough data for modeling. Nice.
 
 Now, to understand the data better, let's take a closer look at some variables that need extra work before modeling.
 
+
+#### Price
 Our target variable is one of the most important variables to check. And we found that it is heavily right skewed and has some missing values there. So let's take out the missing observations and log the price to make it normally distributed.
+
 ```{r}
-# Price
 dat[, Price := as.numeric(gsub('\\$|,','', trimws(Price)))]
 dat <- dat[!is.na(Price)]
+before <- ggplot(dat, aes(x = Price)) + geom_density(color = "red", fill = "red", alpha = 0.3)
+after <- ggplot(dat, aes(x = log(Price))) + geom_density(color = "red", fill = "red", alpha = 0.3)
+multiplot(before, after, cols = 2)
 dat[, Price := log(Price)]
-ggplot(dat, aes(x = Price)) + geom_density(color = "red", fill = "red", alpha = 0.3)
 ```
 
-Having date as a feature is not informative. So extracting month and year from the date can introduce more granularity to the data. Hypothesis is that price varies seasonally and last year housing market might be differnt from this year (a little).
+
+#### Date
+
+Having date as a feature is not informative. So extracting month and year from the date can introduce more granularity to the data. Hypothesis is that price varies seasonally and last year housing market might be differnt from this year (a little maybe).
 
 ```{r}
 #3b. Date, Year
@@ -72,8 +101,9 @@ dat[, Month := month(Date)]
 dat[, Year := as.character(year(Date))]
 ```
 
-Make sure categorical variables are factors.
 
+#### Data Type
+Make sure categorical variables are factors.
 ```{r}
 #3c. Postcode
 dat[, Postcode := as.character(Postcode)]
@@ -85,14 +115,15 @@ factorCols <- names(dat)[sapply(dat, class) %in% "factor"]
 ```
 
 And after the cleaning step, the data now has better form and extra features to be fed into the mode.
-```{r}
-summary(dat)
-```
 
-Missing value is another important step in machine learning. Here we set the missing threshold to be 0.5 which means we remove any features that have more than 50% of values are not avaliable from this dataset.
+For some variables we have 7000 data points missing which could be useless for modeling purpose. Let's take a closer look at each one of them and remove the variables with too many missings.
+
+#### Missing Values
+
+Dealing with NAs is another important step in machine learning. Here we set the missing threshold to be 0.5 which means we remove any features that have more than 50% of values are not avaliable from this dataset.
 
 ```{r}
-MISSING_THRES <- 0.5
+MISSING_THRESHOLD <- 0.5
 ```
 
 And those featuers are:
@@ -100,74 +131,116 @@ And those featuers are:
 sort(sapply(dat, function(x) sum(is.na(x))/nrow(dat)), decreasing = TRUE)
 ```
 
-So after removing those features, BuildingArea and YearBuilt specifically, we have 19 features left over. 
+So after removing those features, BuildingArea and YearBuilt specifically. We have better set of features.
+
 ```{r}
-dat.mr <- dat[, names(dat)[sapply(dat, function(x) sum(is.na(x))/nrow(dat)) < MISSING_THRES], with = FALSE]
+dat.mr <- dat[, names(dat)[sapply(dat, function(x) sum(is.na(x))/nrow(dat)) < MISSING_THRESHOLD], with = FALSE]
 sort(sapply(dat.mr, function(x) sum(is.na(x))/nrow(dat.mr)), decreasing = TRUE)
-dim(dat.mr)
 ```
+
 
 ## Data visualization
-Now the dataset is cleaned up and we are in good shape for visulization in which we are supposed to explore the relationship between target and potential features, among features themselves.
 
+Now the dataset is cleaned up and we are in good shape for visulization in which we are supposed to explore the relationship between target and potential features as well as among features themselves.
+
+#### Univariate Analysis
+For continuous (numerical) variables:
 
 ```{r}
-# An example for continues
-ggplot(dat.mr, aes(x = Distance)) + geom_density(color = "red", fill = "red", alpha = 0.3)
-# An exmaple for categorical variables
-ggplot(dat.mr, aes(x = Type)) + geom_bar()
-# An exmaple for numerical summaries
-summary(dat$Rooms)
+numericalCols <- names(dat.mr)[sapply(dat.mr, class) %in% c("numeric")]
+num.df <- melt(as.data.frame(dat.mr[complete.cases(dat.mr), numericalCols, with = F]))
+ggplot(num.df,aes(x = value)) + 
+    facet_wrap(~variable,scales = "free_x") + 
+    geom_histogram()
 ```
 
-And the second part is the multivariate analysis 
+Other integer type features:
 
+```{r}
+integerCols <- names(dat.mr)[sapply(dat.mr, class) %in% c("integer")]
+integerCols <- integerCols[!integerCols %in% c("Landsize", "Propertycount")]
+num.df <- melt(as.data.frame(dat.mr[complete.cases(dat.mr), integerCols, with = F]))
+ggplot(num.df,aes(x = value)) + 
+    facet_wrap(~variable, scales = "free_x") + 
+    geom_bar()
+```
+
+
+
+For categorical variables: (only displaying features that have less than 40 levels)
+
+```{r}
+p1 <- ggplot(dat.mr[complete.cases(dat.mr)], aes(x = Type)) + geom_bar()
+p2 <- ggplot(dat.mr[complete.cases(dat.mr)], aes(x = Method)) + geom_bar()
+p3 <- ggplot(dat.mr[complete.cases(dat.mr)], aes(x = CouncilArea)) + geom_bar() + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+p4 <- ggplot(dat.mr[complete.cases(dat.mr)], aes(x = Year)) + geom_bar()
+
+multiplot(p1, p2, p3, p4, cols = 2)
+```
+
+
+#### Multivariate analysis 
+
+
+##### Month
 Median price for each month shows the trend that during summer, the median price is the lowest. And it starts to bouce back to the level compare to the beginning of the year.
 ```{r}
-monthprice <- dat.mr[, .(med.price = median(Price, na.rm = TRUE)), by = c("Month")]
-ggplot(monthprice, aes(x = Month, y = med.price)) + geom_line()
-```
-```{r}
-ggplot(dat.mr[Rooms < 7], aes(x = as.factor(Rooms), y = Price)) + geom_boxplot()
+monthprice <- dat.mr[, .(med.price = median(Price)), by = c("Month")]
+ggplot(monthprice, aes(x = Month, y = med.price)) + geom_line() + ylab("log(Price)")
 ```
 
-Definitely, number of rooms closely relates the price and its area.
+Another variable, Rooms, intuitvely should be a strong indicator about the price. Most of them have number of rooms less than 7 so let's focus on those first.
 
-Also, does different seller have different preference towards what kind of houses they are more interested in? Top three sellers vs. Price:
+
 ```{r}
-ggplot(dat.mr[SellerG %in% c("Jellis", "Nelson", "hockingstuart")], aes(x = SellerG, y = Price)) + geom_boxplot()
+ggplot(dat.mr[Rooms < 7], aes(x = as.factor(Rooms), y = Price)) + geom_boxplot() + ylab("log(Price)")
+```
 
+Definitely, number of rooms closely relates the price as we can see that price ditribution various from houses with only 1 room and houses with 6 rooms.
+
+Different area shows different price distribution as well.
+```{r}
+ggplot(dat, aes(x = CouncilArea, y = Price)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ylab("log(Price)")
+ggplot(dat, aes(x = Regionname, y = Price)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ylab("log(Price)")
 ```
 
 
 And the correlation study for numerical variables.
 ```{r}
-# correlation analysis
-cor(dat.mr$Distance, dat.mr$Rooms)
+numericalCols <- names(dat.mr)[sapply(dat.mr, class) %in% c("numeric", "integer")]
+corrplot(cor(dat.mr[complete.cases(dat.mr), numericalCols, with = F]), method = "shade", tl.col = "black", tl.srt = 45, type = "lower")
+```
+
+Bedrooms and rooms highly correlates with each other as we can see from the plot above. So lets keep Rooms since bedrooms has approximately 20% missing values in the data.
+
+```{r}
+dat.mr <- dat.mr[, !names(dat.mr) %in% c("Bedroom2"), with = F]
 ```
 
 
 ## Feature engineering
 
-Obviously, we can't have categoricals with too many levels. Since it will slow down the training process as well as making the categorical variables stand out from other features.
+Obviously, we can't have categoricals with too many levels. Since it will slow down the training process as well as making the categorical variables stand out from other features if RF or tree based model is where we are going.
 
-Let's start with postcode which has 200 levels (crazy, and possibly overfit the model if it is too detailed.) What we can do is take the first two digits of the code and escalate to one level up comparing to the 4 digits postcode. Does it make sense to chop it off? Of course! Check out this link. 
+
+#### Postcode
+Let's start with postcode which has 200 levels (crazy, and possibly overfit the model if it is too detailed.) What we can do is take the first two digits of the code and escalate to one level up comparing to the 4 digits postcode. Does it make sense to chop it off? Of course! Check out this [link](https://en.wikipedia.org/wiki/Postcodes_in_Australia). 
 
 ```{r}
-# document the decision and explain
-# comment on the results
 dat.mr[, Postcode := substring(as.character(Postcode), 1, 2)]
 dat.mr[, Postcode := as.factor(Postcode)]
 ```
 
-So now it looks much better with just two digits which decreases the unique level to 8. 
+So now it is much better with just two digits which decreases the number of unique levels to 8. 
 
-
-Seller name is another predictor that requires some transformation since we have 200 different seller. Should we question the predicting power of this feature? I think so but the graph below shows some interesting insights to answer this question.
+#### Seller
+Seller name is another predictor that requires some transformations since we have 200 different seller. Should we question the predicting power of this feature? I think so but the graph below shows some interesting insights to answer this question.
 
 ```{r}
 ggplot(dat.mr[SellerG %in% c("Jellis", "Nelson", "hockingstuart")], aes(x = SellerG, y = Price)) + geom_boxplot()
 ```
+
+It seems like Jellis slightly prefer houses that are more expensive than other two sellers.
 
 These are sellers with top selling records meaning top 3 most frequent sellers showed up in the dataset. For each of them, the property price distribution varies from each other. Maybe Nelson and hockingstuart (?) tend to have similar records but Jellis definitely obtains a more right skewed distribution for price. 
 
@@ -184,32 +257,28 @@ ggplot(dat.mr[SellerG %in% topSellersName], aes(x = SellerG, y = Price)) + geom_
 ```
 
 
-It looks like it has some predictive power. So lets keep this feature for now. Wait, it's cardinality is pretty high. (262 levels). Right, one thing we can do, is keep the top 20 names and rename the rest of it to others. And now lets check if there is any other high-cardinal features.
+
+It looks like it has some predictive power. So lets keep this feature for now. Wait, it's cardinality is pretty high. (262 levels). One thing we can do, is to keep the top 20 names and rename the rest of them to others. And now lets check if there is any other high-cardinal features.
+
+
+#### High Cardinality
 
 ```{r}
 dat.mr[!SellerG %in% topSellersName, SellerG := "Others"]
 sapply(dat.mr[, names(dat.mr) %in% factorCols, with = F], function(x) length(unique(x)))
-summary(dat.mr)
 ```
+
 
 Looks like we have more than one variables describe the location of the property. Suburb, Address, CoucilArea and Region name. Suburb is just another granularity for postcode. So we can remove suburb as its duplicating function. Address behaves like unique identifier so we can remove that as well. We have council area and region name, another way to summarize the location info. Keep it for now since we are using RF for modeling and correlated features are not a big trouble for those trees. (hopefully...)
 
+
+Drop Address since we have postcode. We lost info after dropping suburb.
 ```{r}
-sort(table(dat.mr$CouncilArea))
-ggplot(dat, aes(x = CouncilArea, y = Price)) + geom_boxplot() + geom_boxplot() + theme(axis.text.x = element_text(angle = 90, hjust = 1))
-
-```
-
-
-
-
-```{r}
-# intuitively 
-# base line model
-# scientific method
 dat.fr <- dat.mr[, !names(dat.mr) %in% c("Date", "Lattitude", "Longtitude", "Address", "Suburb"), with = FALSE]
 sapply(dat.fr[, names(dat.fr) %in% factorCols, with = F], function(x) length(unique(x)))
 ```
+
+
 
 Let's see the dimensionality after we dummy the cateogrical variables. But let's first fix the name for council area as they will become column names later.
 
@@ -232,7 +301,9 @@ dim(dum.dat)
 Not bad for 10k data.
 Alright, let's go ahead and start the most exciting part: Modeling!!!! 
 
-Let's do 80% of training and 20% of testing. Among of 80% training, we will do a 10 fold cross validation for parameter tuning as well which means our training and validation set are
+## Modeling
+Let's do 80% of training and 20% of testing. Among of 80% training, we will do a 10 fold cross validation for parameter tuning as well which means our training and validation set are combined. 
+
 
 ```{r}
 set.seed(1015)
@@ -243,10 +314,24 @@ dim(houseTrain)
 dim(houseTest)
 ```
 
-89-D for feature space. That'll work since Matt is pretty generous on data size that he gave me 17k data instead of 100 rows. 
+88-D for feature space. That'll work since Matt is pretty generous on data size that he gave me 17k data instead of 100 rows. 
 
-## Modeling
-Now we can start with a baseline model from RF. 
+
+#### Decision Tree
+Decision Tree is really good at non-linear prediction and it is easy for business to understand. So let's try decision tree first.
+Note that rpart package implements the cross validation process already so the parameters are all set.
+
+```{r}
+dt <- rpart(Price ~., method = "anova", data = houseTrain)
+pred.dt <- predict(dt, houseTest[, colnames(houseTest) != "Price"])
+dt.res <- with(houseTest, mean((houseTest$Price - pred.dt)^2))
+dt.res
+```
+
+
+
+Another model that can potentially beat the traditional decision tree is Random Forests. Let's start with something basic.
+
 ```{r}
 rf.base <- randomForest(Price ~., data = houseTrain)
 ```
@@ -257,11 +342,16 @@ How many trees are needed?
 plot(rf.base)
 ```
 
-Less than 100 is enough. 
+Less than 100 is enough. That leads to parameter tuning step for Random Forests.
+
+#### Parameter Tuning
 
 ```{r}
 tuned.rf <- tuneRF(houseTrain[, !colnames(houseTrain) == "Price"], houseTrain$Price, ntreeTry = 100, stepFactor = 10, improve = 0.01)
 ```
+
+
+Let's fix the parameters: number of features to use as 29 and number of trees to build as 100.
 
 ```{r}
 rf <- randomForest(Price ~., data = houseTrain, ntree = 100, mtry = 29)
@@ -269,29 +359,66 @@ rf <- randomForest(Price ~., data = houseTrain, ntree = 100, mtry = 29)
 
 
 ## Testing
+
+#### Result
+
 All set! Lets see how it works on the test data.
-```{r}
-pred <- predict(rf, houseTest) 
-with(houseTest, mean((houseTest$Price - pred)^2)) 
-```
-Not bad! How aboue feature importance?
 
 ```{r}
-varImpPlot(rf)
+pred.dt <- predict(dt, houseTest[, colnames(houseTest) != "Price"])
+dt.res <- with(houseTest, mean((houseTest$Price - pred.dt)^2))
+pred.rf <- predict(rf, houseTest) 
+rf.res <- with(houseTest, mean((houseTest$Price - pred.rf)^2)) 
+
+print (paste("Decision Tree MSE: ", as.character(dt.res)))
+print (paste("Random Forests MSE: ", as.character(rf.res)))
+```
+
+To compare these two models, we can see that RF has clear advantage in predicting price.
+
+
+Algorithms    | MSE
+---------------|----
+Decision Tree  | 0.11
+Random Forests | 0.04
+
+
+
+#### Feature Importance
+How aboue feature importance from RF?
+
+```{r}
+varImpPlot(rf, type = 2)
 imp <- as.data.frame(importance(rf))
 rownames(imp)[order(-imp$IncNodePurity)][1:10]
 ```
 
+Basically, what type the house is, distance to downtown and number of rooms it has are ranked as the most important factors for price estimation based on the given dataset. 
+
+
 ## How can we deploy this model?
+The focus of this project is trying to understand the relationship between housing features and its price. And we also hope to develop a model that is able to predict the price at the same time. So let's try an example to understand how to deploy the model
 
-1. Predict the price so you know if it is reasonable number for certain property.
-2. The property type matters for the price (duh....) and distance to downtown area. So that may be another reflection on what customer really cares and could be the selling points when advertising for properties. For example, make it bold and 24 pts for front, etc. (I am not a designer, so that's all I know.)
+```{r}
+set.seed(18)
+sample <- houseTest[sample(1:nrow(houseTest), 1), ]
+sample
+pred <- predict(rf, sample[, !colnames(sample) %in% c("Price")])
+print (paste("True Price: ", as.character(exp(sample$Price))))
+print (paste("Predicted Price: ", as.character(exp(pred))))
+diff <- exp(as.numeric(pred)) - exp(sample$Price)
+print (paste("Model is off by: ", as.character(diff/exp(sample$Price))))
+```
 
+This is a house with 3 rooms, type H, with two bathrooms and two parking spaces (car), 530k as its real price and the model predicts it to be 555k
+
+
+Specifically, from business stand-point, the key take-aways are:
+1. The property type matters for the price (duh....) and distance to downtown area. So that may be another reflection on what customer really cares and could be the selling points when advertising for properties. For example, make it bold and 24 pts for front, etc. (I am not a designer, so that's all I know.)
+2. Predict the price so you know if it is reasonable number for certain property.
 
 
 ## Next step
 1. Of course, if time permits, more model techinques should be tested. For example, GBM, SVM or GLM could be more powerful than RF or even combine RF with GLM (feature selection first and then fit it into GLM).
 
-2. Also, for other techinuqes, cross-validation would be more insightful comparing to RF since RF reports OOB which is equalivent to leave one out.
-
-3. Always explore more features either internally (property's transaction history, how long it takes before its sold, etc.) or externally (crime rate, population density, any school in the neighborhood, etc) and make your model better.
+2. Always explore more features either internally (property's transaction history, how long it takes before its sold, etc.) or externally (crime rate, population density, any school in the neighborhood, etc) and make your model better.
